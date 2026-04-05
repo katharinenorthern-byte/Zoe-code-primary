@@ -74,13 +74,14 @@ TOOL_COLS  = [(140, 90, 30), (40, 130, 210), (80, 170, 50), (210, 170, 40)]
 # ─── data classes ────────────────────────────────────────────────────────────
 @dataclass
 class Crop:
-    kind:        str
-    planted_day: int
-    watered:     bool = False
+    kind:         str
+    planted_day:  int
+    watered:      bool = False
+    days_watered: int  = 0
 
     def stage(self, day: int) -> int:
         """Return growth stage: 0=seed  1=sprout  2=growing  3=ready"""
-        age  = day - self.planted_day
+        age  = self.days_watered
         need = CROP_INFO[self.kind][0]
         if age <= 0:    return 0
         if age >= need: return 3
@@ -88,7 +89,7 @@ class Crop:
         return 1 if frac < 0.4 else 2
 
     def ready(self, day: int) -> bool:
-        return day - self.planted_day >= CROP_INFO[self.kind][0]
+        return self.days_watered >= CROP_INFO[self.kind][0]
 
 
 @dataclass
@@ -206,6 +207,8 @@ class Game:
             return
         self.day += 1
         for crop in self.crops.values():
+            if crop.watered:
+                crop.days_watered += 1
             crop.watered = False
         self.msg_show(f"  Good morning!  Day {self.day} begins.  ")
 
