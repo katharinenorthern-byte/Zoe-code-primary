@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Tiny Farm</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{width:100%;height:100%;background:#0a0a0a;overflow:hidden;font-family:monospace}
+#layout{display:flex;flex-direction:column;width:100%;height:100%}
+#canvasWrap{flex:1;min-height:0;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#0a0a0a}
+canvas{display:block}
+#controls{flex-shrink:0;background:#120c04;border-top:2px solid #7a5820;padding:6px 10px;display:flex;align-items:center;gap:8px;height:108px}
+#dpad{display:grid;grid-template-columns:repeat(3,38px);grid-template-rows:repeat(3,38px);gap:2px;flex-shrink:0}
+.dpb{background:#1e1408;border:2px solid #7a5820;border-radius:6px;color:#e8d8a0;font-size:16px;display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none;touch-action:none}
+.dpb:active{background:#3a2810}
+.dps{background:transparent!important;border:1px dashed #333!important;color:#333!important;font-size:9px;cursor:default}
+#useBtn{width:72px;height:72px;border-radius:50%;background:#1e3a0a;border:3px solid #50a018;color:#c8f060;font-size:12px;font-weight:bold;font-family:monospace;cursor:pointer;user-select:none;touch-action:none;flex-shrink:0;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.25;padding:0}
+#useBtn:active{background:#103000}
+#actionCol{display:flex;flex-direction:column;align-items:center;gap:5px;flex-shrink:0}
+#seedBtn{width:72px;height:26px;background:#0a1e0a;border:2px solid #406820;border-radius:5px;color:#80c040;font-size:10px;font-family:monospace;cursor:pointer;user-select:none;touch-action:none;display:flex;align-items:center;justify-content:center;padding:0}
+#seedBtn:active{background:#183010}
+#toolPanel{flex:1;display:flex;flex-direction:column;gap:4px;min-width:0}
+#toolRow,#miscRow{display:flex;gap:3px}
+.tbtn{flex:1;height:40px;background:#1e1408;border:2px solid #7a5820;border-radius:5px;color:#d8c890;font-size:10px;font-family:monospace;cursor:pointer;user-select:none;touch-action:none;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.3;min-width:0;padding:0}
+.tbtn.active{background:#3a2810;border-color:#f5f0e1;color:#fff}
+.tbtn:active{background:#3a2810}
+.mbtn{flex:1;height:34px;background:#101e10;border:2px solid #406820;border-radius:5px;color:#90c060;font-size:10px;font-family:monospace;cursor:pointer;user-select:none;touch-action:none;display:flex;align-items:center;justify-content:center;min-width:0;padding:0}
+.mbtn:active{background:#203820}
+</style>
+</head>
+<body>
+<div id="layout">
+  <div id="canvasWrap"><canvas id="gc"></canvas></div>
+  <div id="controls">
+    <div id="dpad">
+      <div class="dpb dps"></div><div class="dpb" id="dUp">&#9650;</div><div class="dpb dps"></div>
+      <div class="dpb" id="dLeft">&#9664;</div><div class="dpb dps">&#43;</div><div class="dpb" id="dRight">&#9654;</div>
+      <div class="dpb dps"></div><div class="dpb" id="dDown">&#9660;</div><div class="dpb dps"></div>
+    </div>
+    <div id="actionCol">
+      <button id="useBtn">USE<br>TOOL</button>
+      <button id="seedBtn">&#127807; Cycle Seed</button>
+    </div>
+    <div id="toolPanel">
+      <div id="toolRow">
+        <button class="tbtn active" data-t="0">1<br>Hoe</button>
+        <button class="tbtn" data-t="1">2<br>Water</button>
+        <button class="tbtn" data-t="2">3<br>Seeds</button>
+        <button class="tbtn" data-t="3">4<br>Harv</button>
+      </div>
+      <div id="miscRow">
+        <button class="mbtn" id="sleepBtn">&#128564; Sleep</button>
+        <button class="mbtn" id="shopBtn">&#128722; Shop</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+'use strict';
+// ─── Constants ────────────────────────────────────────────────────────────────
+const TILE_PX=48,COLS=22,ROWS=16;
+const GRASS=0,DIRT=1,WET=2,WATER=3,WALL=4,PATH=5,BED=6,SHOP_T=7,FLOOR=8;
+const PASSABLE=new Set([GRASS,DIRT,WET,PATH,BED,FLOOR,SHOP_T]);
+const TILE_COL={
+  [GRASS]:[106,148,70],[DIRT]:[155,103,60],[WET]:[90,55,25],
+  [WATER]:[64,164,223],[WALL]:[90,58,25],[PATH]:[193,168,107],
+  [BED]:[180,100,120],[SHOP_T]:[100,155,85],[FLOOR]:[200,170,120]
+};
+const CROP_DATA={
+  turnip:{days:3,sell:8,cost:0,color:[200,200,80]},
+  carrot:{days:4,sell:15,cost:10,color:[230,120,40]},
+  melon:{days:6,sell:35,cost:20,color:[100,180,80]}
+};
+const SEED_NAMES=['turnip','carrot','melon'];
+const TOOL_NAMES=['Hoe','Watering Can','Seeds','Harvest'];
+const TOOL_COLS=[[140,90,30],[40,130,210],[80,170,50],[210,170,40]];
+const CWHITE=[245,240,225],CBLACK=[15,15,15],CGOLD=[230,190,40],CGREEN=[60,180,60];
+const CUI_BG=[30,20,10],CUI_BR=[200,160,80];
+const CSKIN=[220,170,110],CHAIR=[100,60,20],CSHIRT=[80,120,180],CPANTS=[60,80,140],CSTEM=[80,160,50];
+const BUY_ITEMS=[
+  {label:'Carrot Seeds  x5', cost:10,kind:'carrot',qty:5},
+  {label:'Melon Seeds   x5', cost:20,kind:'melon', qty:5},
+  {label:'Carrot Seeds  x10',cost:18,kind:'carrot',qty:10},
+  {label:'Melon Seeds   x10',cost:35,kind:'melon', qty:10}
+];
+const rgb=([r,g,b])=>`rgb(${r},${g},${b})`;
+const rgba=([r,g,b],a)=>`rgba(${r},${g},${b},${a})`;
+
+// ─── Canvas & Camera ──────────────────────────────────────────────────────────
+const canvas=document.getElementById('gc');
+const ctx=canvas.getContext('2d');
+let VW=0,VH=0,TSIZ=TILE_PX,CAM_C=0,CAM_R=0;
+
+function resizeCanvas(){
+  const wrap=document.getElementById('canvasWrap');
+  VW=wrap.clientWidth||window.innerWidth;
+  VH=wrap.clientHeight||(window.innerHeight-108);
+  canvas.width=VW; canvas.height=VH;
+  const s=Math.min(VW/(COLS*TILE_PX),VH/(ROWS*TILE_PX));
+  TSIZ=Math.round(Math.min(Math.max(36,TILE_PX*s),TILE_PX*1.5));
+}
+function updateCamera(){
+  const p=G.player,visC=VW/TSIZ,visR=VH/TSIZ;
+  CAM_C=Math.max(0,Math.min(Math.max(0,COLS-visC),p.x+0.5-visC/2));
+  CAM_R=Math.max(0,Math.min(Math.max(0,ROWS-visR),p.y+0.5-visR/2));
+}
+const wx=c=>(c-CAM_C)*TSIZ;
+const wy=r=>(r-CAM_R)*TSIZ;
+
+// ─── Map ──────────────────────────────────────────────────────────────────────
+function buildMap(){
+  const g=Array.from({length:ROWS},()=>new Array(COLS).fill(GRASS));
+  const fill=(r0,c0,r1,c1,t)=>{for(let r=r0;r<=r1;r++)for(let c=c0;c<=c1;c++)g[r][c]=t;};
+  const box=(r0,c0,r1,c1,wt=WALL,it=FLOOR)=>{
+    fill(r0,c0,r1,c1,it);
+    for(let c=c0;c<=c1;c++){g[r0][c]=wt;g[r1][c]=wt;}
+    for(let r=r0;r<=r1;r++){g[r][c0]=wt;g[r][c1]=wt;}
+  };
+  box(0,0,ROWS-1,COLS-1,WALL,GRASS);
+  box(1,1,4,5,WALL,FLOOR); g[2][3]=BED; g[4][2]=FLOOR; g[4][3]=FLOOR;
+  fill(1,7,3,10,WATER);
+  box(7,1,10,5,WALL,SHOP_T); g[10][2]=FLOOR; g[10][3]=FLOOR;
+  fill(5,1,5,10,PATH); fill(11,1,11,10,PATH);
+  fill(1,6,6,6,PATH);  fill(6,1,6,6,PATH);
+  fill(1,11,13,11,PATH); fill(7,6,7,11,PATH);
+  return g;
+}
+// ─── Game State ───────────────────────────────────────────────────────────────
+const G={
+  grid:buildMap(),
+  crops:{},
+  player:{x:3,y:6,dx:0,dy:1,tool:0,gold:50,seeds:{turnip:5},bag:{},seedIdx:0,moveAt:0},
+  day:1,shopOpen:false,shopSel:0,msg:'',msgTimer:0
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const gTile=(x,y)=>(x>=0&&x<COLS&&y>=0&&y<ROWS)?G.grid[y][x]:WALL;
+const facing=()=>[G.player.x+G.player.dx,G.player.y+G.player.dy];
+const showMsg=(txt,t=220)=>{G.msg=txt;G.msgTimer=t;};
+const near=tt=>[[0,0],[1,0],[-1,0],[0,1],[0,-1]].some(([dx,dy])=>gTile(G.player.x+dx,G.player.y+dy)===tt);
+const cropStage=(c,day)=>{
+  const age=day-c.plantedDay,need=CROP_DATA[c.kind].days;
+  return age<=0?0:age>=need?3:age/need<0.4?1:2;
+};
+const cropReady=(c,day)=>day-c.plantedDay>=CROP_DATA[c.kind].days;
+
+// ─── Actions ──────────────────────────────────────────────────────────────────
+function doSleep(){
+  if(!near(BED)){showMsg('Sleep in your bed \u2014 go inside your house.');return;}
+  G.day++;
+  Object.values(G.crops).forEach(c=>c.watered=false);
+  showMsg(`  Good morning!  Day ${G.day} begins.  `);
+}
+
+function useTool(){
+  if(G.shopOpen){shopConfirm();return;}
+  const p=G.player,[fx,fy]=facing(),t=gTile(fx,fy),ck=`${fx},${fy}`;
+  switch(p.tool){
+    case 0:
+      if(t===GRASS){G.grid[fy][fx]=DIRT;showMsg('Tilled the soil.');}
+      else showMsg('Can only till grass tiles.');
+      break;
+    case 1:
+      if((t===DIRT||t===WET)&&ck in G.crops){
+        G.grid[fy][fx]=WET;G.crops[ck].watered=true;showMsg('Watered!');
+      }else if(t===DIRT||t===WET) showMsg('Nothing is planted here.');
+      else showMsg('Water only tilled soil.');
+      break;
+    case 2:{
+      const kind=SEED_NAMES[p.seedIdx];
+      if(t===DIRT||t===WET){
+        if(!(ck in G.crops)){
+          if((p.seeds[kind]||0)>0){
+            G.crops[ck]={kind,plantedDay:G.day,watered:false};
+            p.seeds[kind]--;
+            showMsg(`Planted ${kind}.`);
+          }else showMsg(`No ${kind} seeds!  Buy some at the shop.`);
+        }else showMsg('Something is already planted here.');
+      }else showMsg('Need tilled soil first  (use Hoe).');
+      break;}
+    case 3:
+      if(ck in G.crops){
+        const cr=G.crops[ck];
+        if(cropReady(cr,G.day)){
+          p.bag[cr.kind]=(p.bag[cr.kind]||0)+1;
+          delete G.crops[ck];G.grid[fy][fx]=DIRT;
+          showMsg(`Harvested ${cr.kind}!  Sells for ${CROP_DATA[cr.kind].sell}g.`);
+        }else{
+          const rem=CROP_DATA[cr.kind].days-(G.day-cr.plantedDay);
+          showMsg(`Not ready \u2014 ${rem} more day(s).`);
+        }
+      }else showMsg('Nothing to harvest here.');
+      break;
+  }
+}
+
+function openShop(){
+  if(!near(SHOP_T)){showMsg('Walk to the shop first.');return;}
+  G.shopOpen=true;G.shopSel=0;
+}
+
+function shopConfirm(){
+  const p=G.player;
+  if(G.shopSel<BUY_ITEMS.length){
+    const {cost,kind,qty}=BUY_ITEMS[G.shopSel];
+    if(p.gold>=cost){p.gold-=cost;p.seeds[kind]=(p.seeds[kind]||0)+qty;showMsg(`Bought ${qty}x ${kind} seeds!`);}
+    else showMsg('Not enough gold!');
+  }else{
+    const total=Object.entries(p.bag).reduce((s,[k,v])=>s+CROP_DATA[k].sell*v,0);
+    if(total>0){p.gold+=total;p.bag={};showMsg(`Sold everything for ${total}g!`);}
+    else showMsg('Your bag is empty.');
+  }
+}
+
+function cycleSeed(){
+  const p=G.player;p.seedIdx=(p.seedIdx+1)%SEED_NAMES.length;
+  showMsg(`Seed selected: ${SEED_NAMES[p.seedIdx]}`);
+}
+function selectTool(i){G.player.tool=i;updateToolBtns();}
+// ─── Input ────────────────────────────────────────────────────────────────────
+const keys={};
+const dpad={up:false,down:false,left:false,right:false};
+
+document.addEventListener('keydown',e=>{
+  keys[e.key]=true;
+  const nOpts=BUY_ITEMS.length+1;
+  if(G.shopOpen){
+    if(e.key==='Escape')G.shopOpen=false;
+    else if(e.key==='ArrowUp'||e.key==='w')G.shopSel=(G.shopSel-1+nOpts)%nOpts;
+    else if(e.key==='ArrowDown'||e.key==='s')G.shopSel=(G.shopSel+1)%nOpts;
+    else if(e.key===' '||e.key==='Enter')shopConfirm();
+    e.preventDefault();return;
+  }
+  if(e.key==='1')selectTool(0);
+  else if(e.key==='2')selectTool(1);
+  else if(e.key==='3')selectTool(2);
+  else if(e.key==='4')selectTool(3);
+  if(e.key==='Tab'){cycleSeed();e.preventDefault();}
+  if(e.key===' '||e.key==='Enter')useTool();
+  if(e.key==='z'||e.key==='Z')doSleep();
+  if(e.key==='e'||e.key==='E')openShop();
+});
+document.addEventListener('keyup',e=>{keys[e.key]=false;});
+
+function updateMovement(now){
+  const p=G.player;
+  if(now-p.moveAt<140)return;
+  if(G.shopOpen){
+    const nOpts=BUY_ITEMS.length+1;
+    let nav=false;
+    if(dpad.up){G.shopSel=(G.shopSel-1+nOpts)%nOpts;nav=true;}
+    if(dpad.down){G.shopSel=(G.shopSel+1)%nOpts;nav=true;}
+    if(nav)p.moveAt=now;
+    return;
+  }
+  let dx=0,dy=0;
+  if(keys['ArrowUp']||keys['w']||dpad.up)dy=-1;
+  else if(keys['ArrowDown']||keys['s']||dpad.down)dy=1;
+  if(keys['ArrowLeft']||keys['a']||dpad.left)dx=-1;
+  else if(keys['ArrowRight']||keys['d']||dpad.right)dx=1;
+  if(dx||dy){
+    p.dx=dx;p.dy=dy;
+    const nx=p.x+dx,ny=p.y+dy;
+    if(PASSABLE.has(gTile(nx,ny))){p.x=nx;p.y=ny;}
+    p.moveAt=now;
+  }
+}
+
+// ─── Drawing ──────────────────────────────────────────────────────────────────
+function drawTiles(){
+  const sc=Math.floor(CAM_C),ec=Math.min(COLS-1,Math.ceil(CAM_C+VW/TSIZ)+1);
+  const sr=Math.floor(CAM_R),er=Math.min(ROWS-1,Math.ceil(CAM_R+VH/TSIZ)+1);
+  for(let r=sr;r<=er;r++){
+    for(let c=sc;c<=ec;c++){
+      const t=G.grid[r][c];
+      let col;
+      if(t===GRASS)col=(r+c)%2===0?[106,148,70]:[96,138,62];
+      else if(t===WATER)col=(r+c)%2===0?[64,164,223]:[54,148,210];
+      else col=TILE_COL[t]||[80,80,80];
+      const sx=Math.round(wx(c)),sy=Math.round(wy(r));
+      ctx.fillStyle=rgb(col);ctx.fillRect(sx,sy,TSIZ+1,TSIZ+1);
+      ctx.strokeStyle=rgb(CBLACK);ctx.lineWidth=1;
+      ctx.strokeRect(sx+.5,sy+.5,TSIZ-1,TSIZ-1);
+    }
+  }
+  // House roof
+  const hx=Math.round(wx(1)),hy=Math.round(wy(0));
+  ctx.fillStyle='rgb(160,50,50)';ctx.fillRect(hx,hy,5*TSIZ,TSIZ);
+  ctx.fillStyle=rgb(CWHITE);ctx.font=`bold ${Math.round(TSIZ*0.38)}px monospace`;
+  ctx.fillText('Home',hx+Math.round(TSIZ*0.25),hy+Math.round(TSIZ*0.62));
+  // Shop roof
+  const shx=Math.round(wx(1)),shy=Math.round(wy(6));
+  ctx.fillStyle='rgb(55,110,60)';ctx.fillRect(shx,shy,5*TSIZ,TSIZ);
+  ctx.fillStyle=rgb(CWHITE);ctx.font=`bold ${Math.round(TSIZ*0.38)}px monospace`;
+  ctx.fillText('Shop',shx+Math.round(TSIZ*0.25),shy+Math.round(TSIZ*0.62));
+  // Farm label
+  const flx=Math.round(wx(13)),fly=Math.round(wy(14));
+  if(flx<VW&&fly<VH){
+    ctx.fillStyle=rgb([130,160,90]);ctx.font=`${Math.round(TSIZ*0.29)}px monospace`;
+    ctx.fillText('\u2014 farm \u2014',flx,fly+Math.round(TSIZ*0.6));
+  }
+}
+
+function drawCrops(){
+  const sc=TSIZ/TILE_PX;
+  for(const [key,crop] of Object.entries(G.crops)){
+    const [cc,cr]=key.split(',').map(Number);
+    const sx=Math.round(wx(cc)),sy=Math.round(wy(cr));
+    if(sx+TSIZ<0||sx>VW||sy+TSIZ<0||sy>VH)continue;
+    const stg=cropStage(crop,G.day),col=CROP_DATA[crop.kind].color;
+    const px=sx+TSIZ/2,py=sy+TSIZ/2;
+    if(stg===0){
+      ctx.fillStyle='rgb(140,110,50)';
+      ctx.beginPath();ctx.arc(px,py+10*sc,4*sc,0,Math.PI*2);ctx.fill();
+    }else if(stg===1){
+      ctx.strokeStyle=rgb(CSTEM);ctx.lineWidth=2*sc;
+      ctx.beginPath();ctx.moveTo(px,py+14*sc);ctx.lineTo(px,py+4*sc);ctx.stroke();
+      ctx.fillStyle=rgb(CSTEM);ctx.beginPath();ctx.arc(px,py+2*sc,5*sc,0,Math.PI*2);ctx.fill();
+    }else if(stg===2){
+      ctx.strokeStyle=rgb(CSTEM);ctx.lineWidth=3*sc;
+      ctx.beginPath();ctx.moveTo(px,py+14*sc);ctx.lineTo(px,py+4*sc);ctx.stroke();
+      ctx.fillStyle=rgb(col);ctx.beginPath();ctx.arc(px,py+2*sc,9*sc,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=rgb(CSTEM);ctx.beginPath();ctx.arc(px-9*sc,py+8*sc,5*sc,0,Math.PI*2);ctx.fill();
+    }else{
+      ctx.strokeStyle=rgb(CSTEM);ctx.lineWidth=3*sc;
+      ctx.beginPath();ctx.moveTo(px,py+14*sc);ctx.lineTo(px,py+2*sc);ctx.stroke();
+      ctx.fillStyle=rgb(col);ctx.beginPath();ctx.arc(px,py,13*sc,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle=rgb(col.map(v=>Math.min(255,v+60)));
+      ctx.beginPath();ctx.arc(px-4*sc,py-4*sc,5*sc,0,Math.PI*2);ctx.fill();
+    }
+    if(crop.watered){
+      ctx.fillStyle='rgb(80,160,240)';
+      ctx.beginPath();ctx.arc(sx+4,sy+4,3,0,Math.PI*2);ctx.fill();
+    }
+  }
+}
+
+function drawPlayer(){
+  const p=G.player,sc=TSIZ/TILE_PX;
+  const px=Math.round(wx(p.x)+TSIZ/2),py=Math.round(wy(p.y)+TSIZ/2);
+  ctx.fillStyle=rgb(CPANTS);
+  ctx.fillRect(Math.round(px-7*sc),Math.round(py+8*sc),Math.round(6*sc),Math.round(10*sc));
+  ctx.fillRect(Math.round(px+1*sc),Math.round(py+8*sc),Math.round(6*sc),Math.round(10*sc));
+  ctx.fillStyle=rgb(CSHIRT);
+  ctx.fillRect(Math.round(px-8*sc),Math.round(py-4*sc),Math.round(16*sc),Math.round(14*sc));
+  ctx.fillStyle=rgb(CSKIN);
+  ctx.beginPath();ctx.arc(px,Math.round(py-10*sc),Math.round(9*sc),0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=rgb(CHAIR);
+  ctx.fillRect(Math.round(px-9*sc),Math.round(py-20*sc),Math.round(18*sc),Math.round(9*sc));
+  let eyes;
+  if(p.dy===1)eyes=[[px-3*sc,py-9*sc],[px+3*sc,py-9*sc]];
+  else if(p.dy===-1)eyes=[[px-3*sc,py-11*sc],[px+3*sc,py-11*sc]];
+  else eyes=[[px+p.dx*5*sc,py-10*sc]];
+  ctx.fillStyle=rgb(CBLACK);
+  eyes.forEach(([ex,ey])=>{ctx.beginPath();ctx.arc(ex,ey,Math.max(1.5,2*sc),0,Math.PI*2);ctx.fill();});
+}
+function drawHud(){
+  const p=G.player,HH=34;
+  // Top bar
+  ctx.fillStyle=rgb(CUI_BG);ctx.fillRect(0,0,VW,HH);
+  ctx.fillStyle=rgb(CUI_BR);ctx.fillRect(0,HH-1,VW,2);
+  ctx.fillStyle=rgb(CGOLD);ctx.font='bold 18px monospace';
+  const ds=` Day ${G.day} `;ctx.fillText(ds,8,24);
+  const dw=ctx.measureText(ds).width;
+  ctx.fillText(` ${p.gold}g `,8+dw+8,24);
+  if(VW>=720){
+    // Full 4-tool bar
+    const toolW=Math.floor((VW-260)/4);
+    for(let i=0;i<4;i++){
+      const tx=260+i*toolW,sel=i===p.tool;
+      if(sel){
+        ctx.fillStyle=rgb(TOOL_COLS[i]);ctx.fillRect(tx-2,2,toolW-2,30);
+        ctx.strokeStyle=rgb(CWHITE);ctx.lineWidth=2;ctx.strokeRect(tx-2,2,toolW-2,30);
+      }
+      ctx.fillStyle=sel?rgb(CWHITE):'rgb(150,140,120)';
+      ctx.font='14px monospace';ctx.fillText(`${i+1}: ${TOOL_NAMES[i]}`,tx+4,22);
+    }
+  }else{
+    // Compact: current tool name centered
+    ctx.font='bold 14px monospace';
+    const tn=`${p.tool+1}: ${TOOL_NAMES[p.tool]}`;
+    const tw=ctx.measureText(tn).width+16;
+    ctx.fillStyle=rgb(TOOL_COLS[p.tool]);ctx.fillRect(Math.round(VW/2-tw/2),3,tw,27);
+    ctx.strokeStyle=rgb(CWHITE);ctx.lineWidth=1.5;ctx.strokeRect(Math.round(VW/2-tw/2),3,tw,27);
+    ctx.fillStyle=rgb(CWHITE);ctx.fillText(tn,Math.round(VW/2-ctx.measureText(tn).width/2),23);
+  }
+  // Bag top-right
+  const bagE=Object.entries(p.bag);
+  if(bagE.length){
+    const s='Bag: '+bagE.map(([k,v])=>`${k}x${v}`).join('  ');
+    ctx.font='13px monospace';ctx.fillStyle=rgb(CWHITE);
+    ctx.fillText(s,VW-ctx.measureText(s).width-6,22);
+  }
+  // Bottom bar
+  ctx.fillStyle=rgb(CUI_BG);ctx.fillRect(0,VH-26,VW,26);
+  ctx.fillStyle=rgb(CUI_BR);ctx.fillRect(0,VH-27,VW,1);
+  ctx.font='13px monospace';
+  if(p.tool===2){
+    const kind=SEED_NAMES[p.seedIdx];
+    ctx.fillStyle=rgb(CGREEN);
+    ctx.fillText(`[Tab] Planting: ${kind} x${p.seeds[kind]||0}   `,8,VH-8);
+  }
+  const hint='WASD/arrows:move   Space:use tool   Z:sleep   E:shop';
+  ctx.fillStyle='rgb(130,120,100)';
+  const hw=ctx.measureText(hint).width;
+  if(hw+8<VW)ctx.fillText(hint,Math.round(VW/2-hw/2),VH-8);
+}
+
+function drawShop(){
+  const p=G.player;
+  const PW=Math.min(440,VW-16),PH=Math.min(310,VH-60);
+  const px=Math.round((VW-PW)/2),py=Math.round((VH-PH)/2);
+  ctx.fillStyle=rgba(CUI_BG,0.97);ctx.fillRect(px,py,PW,PH);
+  ctx.strokeStyle=rgb(CUI_BR);ctx.lineWidth=3;ctx.strokeRect(px,py,PW,PH);
+  ctx.fillStyle=rgb(CGOLD);ctx.font='bold 17px monospace';
+  const title="~ Pierre's General Store ~";
+  ctx.fillText(title,px+Math.round(PW/2-ctx.measureText(title).width/2),py+26);
+  ctx.strokeStyle=rgb(CUI_BR);ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(px+10,py+36);ctx.lineTo(px+PW-10,py+36);ctx.stroke();
+  const bagVal=Object.entries(p.bag).reduce((s,[k,v])=>s+CROP_DATA[k].sell*v,0);
+  const opts=[
+    ...BUY_ITEMS.map(b=>`Buy: ${b.label}  (${b.cost}g)`),
+    `Sell All Crops  (bag=${bagVal}g)`
+  ];
+  const n=opts.length,rowH=Math.max(22,Math.min(32,Math.floor((PH-110)/n)));
+  ctx.font='14px monospace';
+  opts.forEach((opt,i)=>{
+    const oy=py+48+i*rowH,sel=i===G.shopSel;
+    if(sel){ctx.fillStyle='rgb(60,45,20)';ctx.fillRect(px+8,oy-2,PW-16,rowH+1);}
+    if(sel){ctx.fillStyle=rgb(CGOLD);ctx.fillText('>',px+4,oy+Math.round(rowH*0.72));}
+    ctx.fillStyle=sel?rgb(CWHITE):(i===n-1&&bagVal>0?rgb(CGREEN):'rgb(170,160,140)');
+    ctx.fillText(opt,px+18,oy+Math.round(rowH*0.72));
+  });
+  const sepY=py+PH-58;
+  ctx.strokeStyle='rgb(60,45,20)';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(px+10,sepY);ctx.lineTo(px+PW-10,sepY);ctx.stroke();
+  ctx.font='13px monospace';
+  ctx.fillStyle=rgb(CGOLD);ctx.fillText(`Your gold: ${p.gold}g`,px+12,py+PH-40);
+  ctx.fillStyle=rgb(CGREEN);
+  const sk=Object.entries(p.seeds).map(([k,v])=>`${k}:${v}`).join(', ')||'none';
+  ctx.fillText('Seeds: '+sk,px+12,py+PH-24);
+  ctx.fillStyle='rgb(120,110,90)';
+  const sh='D-pad:navigate   USE:buy/sell   Shop btn:close';
+  const shw=ctx.measureText(sh).width;
+  if(shw<PW-10)ctx.fillText(sh,px+Math.round(PW/2-shw/2),py+PH-8);
+}
+
+function drawMsg(){
+  if(!G.msgTimer)return;
+  G.msgTimer--;
+  ctx.font='bold 17px monospace';
+  const w=ctx.measureText(G.msg).width+24,h=32;
+  const bx=Math.round(VW/2-w/2),by=VH-72;
+  ctx.fillStyle='rgba(0,0,0,0.78)';ctx.fillRect(bx,by,w,h);
+  ctx.fillStyle=rgb(CWHITE);ctx.fillText(G.msg,bx+12,by+22);
+}
+// ─── Touch Controls ───────────────────────────────────────────────────────────
+function updateToolBtns(){
+  document.querySelectorAll('.tbtn').forEach((b,i)=>b.classList.toggle('active',i===G.player.tool));
+}
+
+function setupDpad(id,dir){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.addEventListener('touchstart',e=>{e.preventDefault();dpad[dir]=true;},{passive:false});
+  el.addEventListener('touchend',  e=>{e.preventDefault();dpad[dir]=false;},{passive:false});
+  el.addEventListener('touchcancel',e=>{e.preventDefault();dpad[dir]=false;},{passive:false});
+  el.addEventListener('mousedown',()=>dpad[dir]=true);
+  el.addEventListener('mouseup',  ()=>dpad[dir]=false);
+  el.addEventListener('mouseleave',()=>dpad[dir]=false);
+}
+setupDpad('dUp','up');setupDpad('dDown','down');
+setupDpad('dLeft','left');setupDpad('dRight','right');
+
+function onTouchClick(id,fn){
+  const el=document.getElementById(id);
+  if(!el)return;
+  el.addEventListener('touchstart',e=>{e.preventDefault();fn();},{passive:false});
+  el.addEventListener('click',fn);
+}
+onTouchClick('useBtn',()=>{if(G.shopOpen)shopConfirm();else useTool();});
+onTouchClick('seedBtn',cycleSeed);
+onTouchClick('sleepBtn',doSleep);
+onTouchClick('shopBtn',()=>{if(G.shopOpen)G.shopOpen=false;else openShop();});
+
+document.querySelectorAll('.tbtn').forEach((btn,i)=>{
+  btn.addEventListener('touchstart',e=>{e.preventDefault();selectTool(i);},{passive:false});
+  btn.addEventListener('click',()=>selectTool(i));
+});
+
+// ─── Game Loop ────────────────────────────────────────────────────────────────
+window.addEventListener('resize',resizeCanvas);
+resizeCanvas();
+
+function loop(now){
+  updateMovement(now);
+  updateCamera();
+  ctx.fillStyle='#141414';ctx.fillRect(0,0,VW,VH);
+  drawTiles();
+  drawCrops();
+  drawPlayer();
+  drawHud();
+  if(G.shopOpen)drawShop();
+  drawMsg();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
